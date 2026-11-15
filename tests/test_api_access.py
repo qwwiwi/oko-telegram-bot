@@ -72,6 +72,21 @@ def test_rate_limit_per_agent_with_retry_after(db, cfg):
     assert reader.get("/v1/chats").status_code == 429
 
 
+def test_rate_limited_requests_write_one_audit_row_per_window(db, cfg):
+    cfg = agents(seed(db, cfg), rate_per_minute=1)
+    now = [1000.0]
+    reader = TestClient(create_app(cfg, clock=lambda: now[0]), headers=bearer("x" * 32))
+    assert reader.get("/v1/chats").status_code == 200
+    for _ in range(5):  # a flood with a valid key must not grow read_audit
+        assert reader.get("/v1/chats").status_code == 429
+    assert [r["status"] for r in rows(db)] == [200, 429]
+    now[0] += 61  # the 200 left the window, then one more request fits and the next is limited
+    assert reader.get("/v1/chats").status_code == 200
+    assert reader.get("/v1/chats").status_code == 429
+    assert reader.get("/v1/chats").status_code == 429
+    assert [r["status"] for r in rows(db)] == [200, 429, 200, 429]
+
+
 def test_read_audit_rows_without_queries_tokens_or_content(db, cfg):
     cfg = agents(seed(db, cfg), rate_per_minute=6)
     app = create_app(cfg)

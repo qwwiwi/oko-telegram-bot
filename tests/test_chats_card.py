@@ -21,7 +21,7 @@ from archive import approvals
 from archive.approvals import card, render
 from archive.ingest import Ingestor
 
-TITLE = "AI сопровождение Tagir"
+TITLE = "AI сопровождение Alice"
 # Each tap is a fresh Telegram update with its own callback id.
 UPDATES = itertools.count(100)
 
@@ -90,8 +90,8 @@ def test_card_shows_state_client_counts_link_and_stop(db, cfg):
     approved(
         db,
         cfg,
-        client(3, "Tagir", "Ivanov", date=now),
-        client(4, "Tagir", "Ivanov", date=now, document={"file_id": "f"}),
+        client(3, "Alice", "Sample", date=now),
+        client(4, "Alice", "Sample", date=now, document={"file_id": "f"}),
         client_message(5, text="owner", date=now, **{"from": {"id": OWNER, "first_name": "Owner"}}),
         client_message(
             6, text="bot", date=now, **{"from": {"id": 5, "first_name": "Helper", "is_bot": True}}
@@ -102,7 +102,7 @@ def test_card_shows_state_client_counts_link_and_stop(db, cfg):
     lines = text.splitlines()
     assert lines[0] == f"«{TITLE}»"
     assert "Состояние: собираю" in lines
-    assert "Клиент: Tagir Ivanov, Old" in lines
+    assert "Клиент: Alice Sample, Old" in lines
     assert "Сообщений: 5 (сегодня 4)" in lines
     assert "Вложений: 1" in lines
     assert any(line.startswith("Последнее сообщение: ") and line.endswith("МСК") for line in lines)
@@ -334,24 +334,24 @@ def test_confirm_made_while_stopped_cannot_stop_after_enable(db, cfg):
 @pytest.mark.parametrize(
     "raw, shown",
     [
-        ("Tagir +7 (916) 123-45-67", "Tagir …"),
-        ("Tagir 89161234567", "Tagir …"),
-        ("Tagir 8-916-123 45 67", "Tagir …"),
-        ("Call (916)1234567 now", "Call … now"),
-        ("Ivan ivan.petrov+work@mail.example.ru", "Ivan …"),
-        ("Ivan @ivan_petrov", "Ivan …"),
-        ("Ivan https://example.com/path?a=1", "Ivan …"),
-        ("Ivan www.example.com", "Ivan …"),
-        ("Ivan t.me/ivan_petrov", "Ivan …"),
-        ("Ivan https://t.me/+AbCdEf", "Ivan …"),
-        ("Ivan telegram.me/ivan", "Ivan …"),
-        ("Ivan tg://resolve?domain=ivan_petrov", "Ivan …"),
-        ("Ivan TG://Resolve?Domain=ivan_petrov", "Ivan …"),
-        ("Ivan tg://user?id=42 hi", "Ivan … hi"),
-        ("Ivan(tg://resolve?domain=ivan)", "Ivan(…"),
-        ("Ivan 2024", "Ivan 2024"),
+        ("Alice +1 (555) 010-01-01", "Alice …"),
+        ("Alice 15550100102", "Alice …"),
+        ("Alice 1-555-010 01 03", "Alice …"),
+        ("Call (555)0100104 now", "Call … now"),
+        ("Bob bob.sample+work@mail.example.com", "Bob …"),
+        ("Bob @bob_example", "Bob …"),
+        ("Bob https://example.com/path?a=1", "Bob …"),
+        ("Bob www.example.com", "Bob …"),
+        ("Bob t.me/bob_example", "Bob …"),
+        ("Bob https://t.me/+AbCdEf", "Bob …"),
+        ("Bob telegram.me/bob", "Bob …"),
+        ("Bob tg://resolve?domain=bob_example", "Bob …"),
+        ("Bob TG://Resolve?Domain=bob_example", "Bob …"),
+        ("Bob tg://user?id=42 hi", "Bob … hi"),
+        ("Bob(tg://resolve?domain=bob)", "Bob(…"),
+        ("Bob 2024", "Bob 2024"),
         ("Room 123-456", "Room 123-456"),
-        ("AI сопровождение Tagir", "AI сопровождение Tagir"),
+        ("AI сопровождение Alice", "AI сопровождение Alice"),
     ],
 )
 def test_redact_contacts(raw, shown):
@@ -363,43 +363,43 @@ def test_card_redacts_contacts_in_client_names(db, cfg):
     approved(
         db,
         cfg,
-        client(3, "Tagir", "+7 916 123-45-67", author=777, date=1700000001),
-        client(4, "Anna mail@example.com", "@anna_k", author=778, date=1700000002),
-        client(5, "Boris", "https://t.me/boris", author=779, date=1700000003),
+        client(3, "Alice", "+1 555 010-01-05", author=777, date=1700000001),
+        client(4, "Carol user@example.com", "@carol_k", author=778, date=1700000002),
+        client(5, "Dave", "https://t.me/dave", author=779, date=1700000003),
     )
     text, _ = card(db, cfg, CLIENT, 0)
     line = next(line for line in text.splitlines() if line.startswith("Клиент: "))
-    assert line == "Клиент: Boris …, Anna … …, Tagir …"
-    for leaked in ("916", "4567", "mail@", "example", "@anna", "t.me", "boris"):
+    assert line == "Клиент: Dave …, Carol … …, Alice …"
+    for leaked in ("555", "0100", "user@", "example", "@carol", "t.me", "dave"):
         assert leaked not in text
 
 
 def test_card_redacts_tg_link_in_client_name(db, cfg):
     cfg = replace(cfg, dsn=db.info.dsn)
-    approved(db, cfg, client(3, "Ivan", "tg://resolve?domain=ivan_petrov", author=777))
+    approved(db, cfg, client(3, "Bob", "tg://resolve?domain=bob_example", author=777))
     text, _ = card(db, cfg, CLIENT, 0)
-    assert "Клиент: Ivan …" in text.splitlines()
-    for leaked in ("tg:", "resolve", "ivan_petrov"):
+    assert "Клиент: Bob …" in text.splitlines()
+    for leaked in ("tg:", "resolve", "bob_example"):
         assert leaked not in text
 
 
 def test_card_redacts_tg_link_in_title(db, cfg):
     cfg = replace(cfg, dsn=db.info.dsn)
     with Ingestor(db, cfg) as ing:
-        ing.ingest(member(1, title="Ivan TG://resolve?domain=ivan_petrov"))
+        ing.ingest(member(1, title="Bob TG://resolve?domain=bob_example"))
         ing.ingest(tap(2, f"p:yes:{CLIENT}"))
     text, _ = card(db, cfg, CLIENT, 0)
-    assert text.splitlines()[0] == "«Ivan …»"
-    assert "ivan_petrov" not in text
+    assert text.splitlines()[0] == "«Bob …»"
+    assert "bob_example" not in text
 
 
 def test_card_and_list_redact_contacts_in_title(db, cfg):
     cfg = replace(cfg, dsn=db.info.dsn)
-    title = "Tagir +7 916 123 45 67 tagir@example.com @tagir t.me/tagir"
+    title = "Alice +1 555 010 01 06 alice@example.com @alice t.me/alice"
     with Ingestor(db, cfg) as ing:
         ing.ingest(member(1, title=title))
         ing.ingest(tap(2, f"p:yes:{CLIENT}"))
-    shown = "Tagir … … … …"
+    shown = "Alice … … … …"
     text, _ = card(db, cfg, CLIENT, 0)
     assert text.splitlines()[0] == f"«{shown}»"
     assert card(db, cfg, CLIENT, 0, True)[0] == f"Остановить сбор в «{shown}»?"
