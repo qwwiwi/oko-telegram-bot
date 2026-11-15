@@ -2,6 +2,8 @@
 
 Повседневные задачи оператора. Установка – в [README.md](../README.md), база и резервные копии – в [database.md](database.md). Команды даны для Docker Compose в каталоге репозитория; `ops` – сервис для разовых команд.
 
+**Внешняя база (Supabase или свой PostgreSQL, варианты (b) и (c)).** Во всех командах `docker compose up` и `docker compose run` ниже добавляйте `--no-deps`, например `docker compose run --rm --no-deps ops status` и `docker compose up -d --no-deps --force-recreate api`. Без этого флага Compose поднимет встроенный контейнер `db`, который указан в `depends_on` сервисов, и создаст рядом с вашей базой лишнюю пустую.
+
 ## Файлы и права
 
 | Что | Требование |
@@ -77,12 +79,12 @@ docker compose run --rm ops transcripts requeue --chat -1001234567890
 | Симптом | Причина и действие |
 |---|---|
 | Поллер перезапускается, в журнале `archive_command_failed` | Не прошла проверка настроек или личности бота, либо у токена есть вебхук (`webhook_present`), либо второй процесс читает те же обновления (409). Проверьте токен, `expected_bot_id`, что другой экземпляр остановлен; вебхук бот не удаляет сам. |
-| `private_config_permissions_required` и подобные | Права `settings.toml` шире `600` или это ссылка. |
+| `private_config_permissions_required` и подобные | Права `settings.toml` шире `600` или это ссылка. Исправьте: `sudo chown 10001:10001 settings.toml && sudo chmod 600 settings.toml` (нужно при любой базе, в том числе внешней). |
 | Бот не видит сообщения группы | Включён режим приватности и бот не администратор. |
 | Нет запроса «Собирать сообщения?» | Вы не нажимали Start у бота в личных сообщениях, не совпал `owner_tg_id`, поллер остановлен. |
 | Файл `oversized_not_downloaded` | Больше 20 МиБ; скачать нельзя (лимит облачного Bot API). |
 | `/v1/files` отвечает 403 | У ключа `files = false`. |
-| API отвечает 429 | Превышен `rate_per_minute`; подождите `Retry-After`. |
+| API отвечает 429 | Превышен `rate_per_minute`; подождите `Retry-After`. В `read_audit` на каждый ключ пишется не больше одной строки 429 за минуту. |
 
 ## Обновление
 

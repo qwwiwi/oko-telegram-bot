@@ -115,8 +115,8 @@ Supabase – это PostgreSQL с набором надстроек. Бот ис
 
    Файл `move_oko.list` убирает из восстановления команду создания схемы: схему `oko` вы создали заранее (9.1), и у роли бота нет права создавать схемы.
 
-5. Проверьте результат: сравните число строк (`SELECT count(*) FROM messages` в обеих базах), выполните `docker compose run --rm --no-deps ops migrate` (должно напечатать `migration_ok` без изменений), `... ops status`. Счётчики идентификаторов переносятся: на тестовой базе `events_id_seq` после восстановления равен максимальному `events.id`.
-6. Поменяйте `ARCHIVE_DATABASE_DSN` в `.env` и запустите сервисы без контейнера `db`: `docker compose up -d --no-deps api poller worker`. Старый контейнер `db` и `move.dump` не удаляйте несколько дней: это путь отката (верните прежнюю строку подключения).
+5. Поменяйте `ARCHIVE_DATABASE_DSN` в `.env` на строку подключения к новой базе. Пока этого не сделано, `migrate` и `status` работают со старой базой и ничего не говорят о новой. Старый контейнер `db` и `move.dump` не удаляйте несколько дней: это путь отката (верните прежнюю строку подключения).
+6. Проверьте результат уже на новой базе. Сравните число строк (`SELECT count(*) FROM messages` в обеих базах), выполните `docker compose run --rm --no-deps ops migrate` (должно напечатать `migration_ok` без изменений) и `docker compose run --rm --no-deps ops status`. Счётчики идентификаторов переносятся: на тестовой базе `events_id_seq` после восстановления равен максимальному `events.id`. Затем запустите сервисы без контейнера `db`: `docker compose up -d --no-deps api poller worker`.
 7. Проверьте живую работу: отправьте тестовое сообщение в одобренный чат и найдите его в новой базе.
 
 Обратный переезд (с большого на малый) выполняется теми же командами в другую сторону.
@@ -231,7 +231,7 @@ docker compose exec db psql -U archive -d archive -c 'SELECT chat_id, title, sta
 -- размер таблиц базы
 SELECT relname AS table, pg_size_pretty(pg_total_relation_size(c.oid)) AS size
 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname = 'public' AND c.relkind = 'r'
+WHERE n.nspname = current_schema() AND c.relkind = 'r'   -- схема из search_path: public или oko
 ORDER BY pg_total_relation_size(c.oid) DESC;
 
 -- файлы на диске по типам
@@ -297,7 +297,7 @@ SELECT count(*) AS events FROM events;
 
 ## 5. Готовые запросы для владельца и для AI-агента
 
-Подключение: `docker compose exec db psql -U archive -d archive` (владелец) или `psql` под ролью для чтения (раздел 6). ID чата в примерах `-1001234567890`, время – в UTC. Перед запросами по времени удобно выполнить `SET TIME ZONE 'UTC';`.
+Подключение: `docker compose exec db psql -U archive -d archive` (владелец) или `psql` под ролью для чтения (раздел 6). ID чата в примерах `-1001234567890`, время – в UTC. Перед запросами по времени удобно выполнить `SET TIME ZONE 'UTC';`. Запросы не указывают схему и рассчитаны на сессию, где `search_path` ведёт к схеме бота: во встроенной базе это `public`, под ролью бота из 9.1 – `oko`. Под другой ролью сначала выполните `SET search_path = oko;`.
 
 **Сообщения одного чата за период**
 
@@ -457,28 +457,30 @@ rate_per_minute = 60
 
 ### 6.2. Роль только для чтения
 
-Роль без доступа к исходным таблицам; агент видит только представления с нужными чатами и столбцами. Выполните под ролью владельца в базе бота:
+Роль без доступа к исходным таблицам; агент видит только представления с нужными чатами и столбцами. Выполните под ролью с правом создавать роли и объекты в схеме бота (администратор сервера или, для встроенной базы, `archive`). В примере таблицы бота лежат в схеме `oko` – это схема, которую рекомендует раздел 9.1; имена таблиц и представлений указаны с ней явно, поэтому `search_path` сессии не важен:
 
 ```sql
 CREATE ROLE oko_reader LOGIN PASSWORD 'REPLACE_ME_HEX' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
 ALTER ROLE oko_reader SET default_transaction_read_only = on;
 ALTER ROLE oko_reader SET statement_timeout = '30s';
-REVOKE ALL ON ALL TABLES IN SCHEMA public FROM oko_reader;
-GRANT USAGE ON SCHEMA public TO oko_reader;
+REVOKE ALL ON ALL TABLES IN SCHEMA oko FROM oko_reader;
+GRANT USAGE ON SCHEMA oko TO oko_reader;
 
-CREATE VIEW reader_messages AS
+CREATE VIEW oko.reader_messages AS
   SELECT chat_id, message_id, sent_at, author_id, text, reply_to_id, media_group_id
-  FROM messages WHERE chat_id IN (-1001234567890);
+  FROM oko.messages WHERE chat_id IN (-1001234567890);
 
-CREATE VIEW reader_transcripts AS
+CREATE VIEW oko.reader_transcripts AS
   SELECT a.chat_id, a.message_id, a.id AS attachment_id, a.kind, t.text
-  FROM attachments a JOIN transcripts t ON t.attachment_id = a.id
+  FROM oko.attachments a JOIN oko.transcripts t ON t.attachment_id = a.id
   WHERE t.status = 'ready' AND a.chat_id IN (-1001234567890);
 
-GRANT SELECT ON reader_messages, reader_transcripts TO oko_reader;
+GRANT SELECT ON oko.reader_messages, oko.reader_transcripts TO oko_reader;
 ```
 
-Проверено на тестовой базе под ролью `oko_reader`: запросы к представлениям работают; `SELECT` из `messages`, `events` и `chat_approvals` отвечает `permission denied`; `DELETE` из представления отвечает `permission denied`; `CREATE TABLE` отвечает `cannot execute CREATE TABLE in a read-only transaction`.
+**Если схема другая.** Таблицы лежат в той схеме, в которую их создал `migrate`: в схеме из `search_path` роли бота (9.1) либо в `public`, если `search_path` не задавали, – так во встроенной базе (вариант (a)) и в отдельной базе без схемы. Тогда замените `oko` на имя своей схемы во всех строках блока (`REVOKE`, `GRANT USAGE`, оба `CREATE VIEW`, `GRANT SELECT`). Проверить схему можно запросом `SELECT schemaname FROM pg_tables WHERE tablename = 'messages'`. Роли `oko_reader` не нужен `search_path`: читателю достаточно писать `SELECT … FROM oko.reader_messages`.
+
+Проверено на тестовой базе (схема `oko`, `migrate` выполнен под ролью с `search_path = oko`) под ролью `oko_reader`: запросы к представлениям работают; `SELECT` из `oko.messages`, `oko.events` и `oko.chat_approvals` отвечает `permission denied`; `DELETE` из представления отвечает `permission denied`; `CREATE TABLE` отвечает `cannot execute CREATE TABLE in a read-only transaction`.
 
 Роль намеренно не получает `events` (там полные сырые обновления с именами и @username), `jobs`, `read_audit` и `chat_approvals`. Если агенту нужны имена, добавьте представление с нужными полями сами, взяв запрос «Имена авторов» из раздела 5. При добавлении нового чата дополните список `IN (...)` в представлениях (`CREATE OR REPLACE VIEW`).
 
@@ -653,7 +655,7 @@ docker compose run --rm --no-deps ops migrate
 docker compose up -d --no-deps api poller worker
 ```
 
-   Переменная `POSTGRES_PASSWORD` в этом случае не нужна; `OKO_DATA_DIR` нужна по-прежнему (там лежат `media` и `exports`).
+   Переменная `POSTGRES_PASSWORD` в этом случае не нужна; `OKO_DATA_DIR` нужна по-прежнему (там лежат `media` и `exports`). Каталоги `media` и `exports` и права на `settings.toml` подготавливаются так же, как для встроенной базы (README, «Быстрый старт», шаг 4), только без каталога `db`: приложение не читает `settings.toml` с правами шире `600`. Остальные команды `docker compose up` и `docker compose run` (`status`, `export`, `audit prune`, `transcripts requeue`, пересоздание сервисов) тоже запускайте с `--no-deps`.
 
 4. Файлы вложений остаются на диске сервера бота (раздел 3), вне зависимости от того, где лежит база. Резервное копирование внешней базы – `pg_dump` с хоста бота (`pg_dump "$ARCHIVE_DATABASE_DSN" -Fc -f oko.dump`) или средства провайдера; проверьте восстановление так же, как в 7.4.
 
