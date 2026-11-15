@@ -52,6 +52,9 @@ def create_app(cfg, clock=time.monotonic):
         agent = getattr(state, "agent", None)
         if agent is None and windows.take(None, audit.ANONYMOUS_PER_MINUTE):
             return response
+        # A rate-limited flood with a valid key leaves one row per key per window.
+        if response.status_code == 429 and windows.take(("rate_limited", agent), 1):
+            return response
         chat = getattr(state, "chat_id", None)
         row = (agent, route, path_chat(request) if chat is None else chat)
         try:

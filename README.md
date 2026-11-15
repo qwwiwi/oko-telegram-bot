@@ -59,7 +59,7 @@ PostgreSQL + media ──▶ api (HTTP, 127.0.0.1:8610)  ──▶ ваши аг
 - адреса запросов к Telegram содержат токен бота, поэтому журнал запросов `httpx`, `httpcore` и журнал доступа `uvicorn` отключены; текст исключений заменяется фиксированными кодами;
 - если команда падает, она печатает только `archive_command_failed` без трассировки. Это сделано, чтобы в журнал не попали токены и пути. Для диагностики смотрите `ops status`, столбцы `error_code` в таблицах `jobs`, `attachments`, `transcripts`, `events` и состояние контейнеров.
 
-Журнал чтений API (таблица `read_audit`): каждый запрос к маршрутам `/v1/...` пишет одну строку – время, имя ключа, шаблон пути (например `/v1/chats/{chat_id}/messages`), ID чата, HTTP-код и число записей в ответе. Строки с неизвестным или отсутствующим ключом пишутся с пустым именем, не более 60 в минуту на процесс. Если строку журнала записать не удалось, запрос агента возвращает ошибку 500 вместо данных. Очистка: `docker compose run --rm ops audit prune --days 180`.
+Журнал чтений API (таблица `read_audit`): каждый запрос к маршрутам `/v1/...` пишет одну строку – время, имя ключа, шаблон пути (например `/v1/chats/{chat_id}/messages`), ID чата, HTTP-код и число записей в ответе. Строки с неизвестным или отсутствующим ключом пишутся с пустым именем, не более 60 в минуту на процесс. Запросы с верным ключом, на которые API ответил 429 (превышен лимит), оставляют не больше одной строки на ключ за минуту. Если строку журнала записать не удалось, запрос агента возвращает ошибку 500 вместо данных. Очистка: `docker compose run --rm ops audit prune --days 180`.
 
 Что не пишется ни в журналы процессов, ни в `read_audit`: токен бота, ключи API и расшифровки, ключи агентов, строки запросов, тела запросов, тексты сообщений. Сами сообщения хранятся только в базе и на диске (таблица выше).
 
@@ -129,6 +129,8 @@ PostgreSQL + media ──▶ api (HTTP, 127.0.0.1:8610)  ──▶ ваши аг
    docker compose exec db psql -U archive -d archive -c 'SELECT chat_id, title, status FROM chat_approvals'
    docker compose exec db psql -U archive -d archive -c 'SELECT message_id, sent_at, left(text, 40) FROM messages ORDER BY sent_at DESC LIMIT 5'
    ```
+
+Если вы выбрали внешнюю базу (Supabase или свой PostgreSQL, [docs/database.md](docs/database.md), раздел 9): каталог `db` и `POSTGRES_PASSWORD` не нужны, а все команды `docker compose up` и `docker compose run` запускайте с `--no-deps` (шаг 5: `docker compose build`, затем `docker compose run --rm --no-deps ops migrate`, затем `docker compose up -d --no-deps api poller worker`; шаг 6: `docker compose run --rm --no-deps ops status`). Права на `settings.toml` и каталоги `media` и `exports` (шаг 4) нужны в любом варианте.
 
 Образы `postgres` и базовые образы закреплены по хэшам в `compose.yaml` и `Dockerfile`. Сборка образа и запуск контейнеров в этой подготовке не выполнялись: проверялись код, тесты и SQL на PostgreSQL 16 без Docker.
 

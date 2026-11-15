@@ -34,23 +34,37 @@
 
 Попросите пользователя: создать бота в BotFather и сохранить токен; выключить Group Privacy (Bot Settings → Group Privacy → Turn off) либо сделать бота администратором чатов; открыть бота в личных сообщениях и нажать Start; узнать свой числовой Telegram ID. Токен и ID вносятся в `.env` и `settings.toml` самим пользователем или с его согласия (токен – только в `.env`).
 
-### 3. Файлы
+### 3. Файлы и права
 
 ```sh
 cp .env.example .env && chmod 600 .env
 cp settings.example.toml settings.toml
 ```
 
-В `settings.toml` задайте `expected_bot_id` (число до двоеточия в токене) и `owner_tg_id`. В `.env` задайте `ARCHIVE_BOT_TOKEN`, `POSTGRES_PASSWORD` и `ARCHIVE_DATABASE_DSN` (пароль сгенерируйте `openssl rand -hex 24`, один и тот же в обоих местах; значение не выводите в чат), `OKO_DATA_DIR`.
+В `settings.toml` задайте `expected_bot_id` (число до двоеточия в токене) и `owner_tg_id`. В `.env` задайте `ARCHIVE_BOT_TOKEN`, `ARCHIVE_DATABASE_DSN`, `OKO_DATA_DIR`; для встроенной базы (вариант (a)) ещё `POSTGRES_PASSWORD` (пароль сгенерируйте `openssl rand -hex 24`, один и тот же в обоих местах; значение не выводите в чат). Для внешней базы `POSTGRES_PASSWORD` не нужен, `ARCHIVE_DATABASE_DSN` – строка подключения к ней (шаг 4).
+
+Сначала впишите значения, потом выставляйте права: после `chown` обычный пользователь уже не сможет править `settings.toml`. Права нужны **в любом варианте базы**: приложение отказывается читать `settings.toml`, если он доступен группе или всем (`private_config_permissions_required`), а контейнеры работают под пользователем `10001`. Команды с `sudo` выполняйте с согласия пользователя; `/var/lib/oko` – значение по умолчанию для `OKO_DATA_DIR`, подставьте своё.
+
+```sh
+# все варианты (a), (b), (c)
+sudo mkdir -p /var/lib/oko/media /var/lib/oko/exports
+sudo chown 10001:10001 /var/lib/oko/media /var/lib/oko/exports
+sudo chmod 700 /var/lib/oko/media /var/lib/oko/exports
+sudo chown 10001:10001 settings.toml && sudo chmod 600 settings.toml
+
+# только вариант (a), встроенная база
+sudo mkdir -p /var/lib/oko/db
+sudo chown 999:999 /var/lib/oko/db && sudo chmod 700 /var/lib/oko/db
+```
 
 ### 4. База данных (обязательный шаг)
 
 Выберите вариант вместе с пользователем (docs/database.md, раздел «Выбор: маленький проект или большой»):
 
 - маленький проект (один владелец, несколько чатов, небольшой VPS) – вариант (a): контейнер PostgreSQL из `compose.yaml` с профилем памяти по умолчанию;
-- большой проект (много чатов, команда, аналитика, несколько агентов) – вариант (b): свой Supabase, либо (c): существующий PostgreSQL. Создайте отдельную роль и схему (docs/database.md, 9.1), впишите строку подключения в `ARCHIVE_DATABASE_DSN` и дальше запускайте сервисы с `--no-deps`. Параметры Supabase, которые в документе помечены «проверьте в документации Supabase», сверьте с актуальной документацией и сообщите пользователю, что именно вы сверили.
+- большой проект (много чатов, команда, аналитика, несколько агентов) – вариант (b): свой Supabase, либо (c): существующий PostgreSQL. Создайте отдельную роль и схему (docs/database.md, 9.1), впишите строку подключения в `ARCHIVE_DATABASE_DSN` и дальше запускайте **каждую** команду `docker compose up` и `docker compose run` с `--no-deps`: без этого флага Compose поднимет встроенный контейнер `db` (он указан в `depends_on`). Параметры Supabase, которые в документе помечены «проверьте в документации Supabase», сверьте с актуальной документацией и сообщите пользователю, что именно вы сверили.
 
-Для варианта (a) подготовьте каталоги данных и права (README, «Быстрый старт», пункт 4), затем:
+Для варианта (a) каталоги и права уже подготовлены на шаге 3, включая `db`. Затем:
 
 ```sh
 docker compose build
@@ -66,19 +80,30 @@ docker compose exec db psql -U archive -d archive -c '\dt'
 docker compose exec db psql -U archive -d archive -c 'SELECT version FROM schema_version ORDER BY 1'
 ```
 
-Ожидается 14 таблиц и версии 1–5. Для вариантов (b) и (c) те же проверки выполните через `psql` с вашей строкой подключения, а миграцию – `docker compose run --rm --no-deps ops migrate`.
+Ожидается 14 таблиц и версии 1–5. Для вариантов (b) и (c) те же проверки выполните через `psql` с вашей строкой подключения, а образ и миграцию – `docker compose build`, затем `docker compose run --rm --no-deps ops migrate`.
 
 ### 5. Резервная копия (сразу, до включения чатов)
 
-Выполните команды из docs/database.md, раздел 7.4: `pg_dump -Fc` и архив каталога `media`. Проверьте восстановление копии во временную базу и сравните число строк. Предложите пользователю расписание (например, cron на сервере) и место хранения вне сервера; копии должны быть с правами `600` и шифроваться, если хранятся вне сервера. Расписание не включайте без согласия пользователя.
+Выполните команды из docs/database.md, раздел 7.4: `pg_dump -Fc` и архив каталога `media` (для внешней базы `pg_dump` запускается с хоста по строке подключения – 9.1, п. 4). Проверьте восстановление копии во временную базу и сравните число строк. Предложите пользователю расписание (например, cron на сервере) и место хранения вне сервера; копии должны быть с правами `600` и шифроваться, если хранятся вне сервера. Расписание не включайте без согласия пользователя.
 
 ### 6. Запуск
 
+Вариант (a):
+
 ```sh
-docker compose up -d                          # для варианта (b)/(c): docker compose up -d --no-deps api poller worker
+docker compose up -d
 docker compose ps
 curl -s http://127.0.0.1:8610/health          # {"status":"ok"}
 docker compose run --rm ops status
+```
+
+Варианты (b) и (c) – везде `--no-deps`, иначе запустится встроенная база:
+
+```sh
+docker compose up -d --no-deps api poller worker
+docker compose ps
+curl -s http://127.0.0.1:8610/health          # {"status":"ok"}
+docker compose run --rm --no-deps ops status
 ```
 
 ### 7. Первый чат (делает пользователь)
@@ -87,7 +112,7 @@ docker compose run --rm ops status
 
 ### 8. Доступ для агентов и аналитики
 
-Если пользователю нужны агенты: предложите ключ API (docs/database.md, 6.1) или роль только для чтения (6.2). Сгенерируйте ключ так, чтобы в `settings.toml` попал только SHA-256; сам ключ передайте пользователю через менеджер паролей, не через чат. После изменения `settings.toml` пересоздайте `api`.
+Если пользователю нужны агенты: предложите ключ API (docs/database.md, 6.1) или роль только для чтения (6.2). Сгенерируйте ключ так, чтобы в `settings.toml` попал только SHA-256; сам ключ передайте пользователю через менеджер паролей, не через чат. После изменения `settings.toml` пересоздайте `api`: `docker compose up -d --force-recreate api` (для (b) и (c) – `docker compose up -d --no-deps --force-recreate api`).
 
 ### 9. Расшифровка (по желанию)
 
