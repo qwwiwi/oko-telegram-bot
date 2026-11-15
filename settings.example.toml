@@ -1,0 +1,42 @@
+# Copy to settings.toml, edit, then: chmod 600 settings.toml
+# The app refuses a settings file that is group/world readable or a symlink.
+# With Docker the container user is 10001: sudo chown 10001:10001 settings.toml
+# Secrets (bot token, database DSN, vendor keys) are NOT allowed here: use .env.
+
+# Required. Must equal the number before the colon in ARCHIVE_BOT_TOKEN.
+expected_bot_id = 123456
+# Required. Telegram user ID of the only person who approves/stops chats in the bot.
+# Find it with any "get my ID" bot, or from the Telegram client's profile data.
+owner_tg_id = 111111111
+# Optional. Chat that receives operational alerts (default: owner_tg_id).
+# founder_id = 111111111
+# Optional. User IDs of your own team: they are not shown as «Клиент» on a chat card.
+staff = []
+
+media_root = "/var/lib/archive-media"
+export_root = "/var/lib/archive-exports"
+
+# Global transcription switch. A chat additionally needs transcription = true below.
+transcription_enabled = false
+
+# Optional tuning (defaults shown).
+# lease_seconds = 120      # job lease, 5..3600
+# max_attempts = 5         # job retries, 1..20
+# max_file_bytes = 20971520
+# download_seconds = 600   # overall file download deadline, 10..3600
+# alert_threshold = 5      # poller failures before an alert
+
+# Optional per-chat override. It does NOT approve a chat: approval is the owner's
+# «Да» in the bot. Without an entry the chat slug is chat<ID>.
+# [chats."-1001234567890"]
+# slug = "my-team-chat"
+# transcription = false
+# enabled = true           # false = kill switch: no collection, no API reads
+
+# Optional API identities (API keys). Without any [agents.*] the HTTP API answers 401.
+# Put only the SHA-256 of the key here: printf '%s' "$KEY" | sha256sum
+# [agents.analytics]
+# sha256 = "REPLACE_WITH_64_HEX_CHARS_SHA256_OF_THE_KEY"
+# chats = [-1001234567890]
+# files = false            # true allows GET /v1/files/ID
+# rate_per_minute = 60

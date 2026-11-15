@@ -1,0 +1,27 @@
+[project]
+name = "oko-telegram-bot"
+version = "0.1.0"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "fastapi>=0.143.2,<0.145", "psycopg[binary]>=3.3.6,<4", "httpx>=0.28.1,<0.30",
+  "uvicorn>=0.54,<0.56",
+]
+[project.scripts]
+oko = "archive.cli:main"
+[dependency-groups]
+dev = ["pytest>=9.1.1,<10", "ruff>=0.17.1,<0.19"]
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+[tool.hatch.build.targets.wheel]
+packages = ["archive"]
+[tool.hatch.build.targets.wheel.force-include]
+"migrations" = "archive/migrations"
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
